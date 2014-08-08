@@ -99,6 +99,8 @@ public class GenericHandler1 : IHttpHandler, System.Web.SessionState.IRequiresSe
                         context.Response.AddHeader("X-STATUS", "FAIL");
                     }
                 }
+            } else {
+                context.Response.Write("Georg says, 'All seems fine'");
             }
         }
         catch (Exception exKak)
