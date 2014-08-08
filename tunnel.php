@@ -25,7 +25,10 @@ if( !function_exists('apache_request_headers') ) {
         return( $arh );
     }
 }
-
+if ($_SERVER['REQUEST_METHOD'] === 'GET')
+{
+    print("Georg says, 'All seems fine'");
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 	set_time_limit(0);
