@@ -53,7 +53,7 @@ you)
 
 * **Step 2.**
 Configure you tools to use a socks proxy, use the ip address and port you
-spesified when
+specified when
 you started the reGeorgSocksProxy.py
 
 ** Note, if you tools, such as NMap doesn't support socks proxies, use
