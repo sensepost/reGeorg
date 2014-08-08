@@ -27,7 +27,7 @@ if( !function_exists('apache_request_headers') ) {
 }
 if ($_SERVER['REQUEST_METHOD'] === 'GET')
 {
-    print("Georg says, 'All seems fine'");
+    exit("Georg says, 'All seems fine'");
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
