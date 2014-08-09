@@ -121,8 +121,7 @@ https://github.com/sensepost/reGeorg
     }
     catch (Exception exKak)
     {
-        //Response.AddHeader(exKak.Message);
         Response.AddHeader("X-ERROR", exKak.Message);
-        Response.AddHeader("X-ERROR", "FAIL");
+        Response.AddHeader("X-STATUS", "FAIL");
     }
 %>
