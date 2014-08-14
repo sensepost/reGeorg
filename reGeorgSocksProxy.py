@@ -267,6 +267,12 @@ class session(Thread):
                         if response.getheader("set-cookie") != None:
                             cookie = response.getheader("set-cookie")
                         data = response.data
+                        # Yes I know this is horrible, but its a quick fix to issues with tomcat 5.x bugs that have been reported, will find a propper fix laters
+                        try:
+                            if response.getheader("server").find("Apache-Coyote/1.1") > 0:
+                                data = data[:len(data)-1]
+                        except:
+                            pass
                         if data == None: data=""
                     else:
                         data = None
@@ -306,7 +312,7 @@ class session(Thread):
                         if response.getheader("set-cookie") != None:
                             self.cookie = response.getheader("set-cookie")
                     else:
-                        log.error("[%s:%d] HTTP [%d]: Status: [%s]: Message [%s] Shutting down" % (self.target,response.status,status,response.getheader("x-error")))
+                        log.error("[%s:%d] HTTP [%d]: Status: [%s]: Message [%s] Shutting down" % (self.target,self.port,response.status,status,response.getheader("x-error")))
                         break
                 else: 
                     log.error("[%s:%d] HTTP [%d]: Shutting down" % (self.target,self.port,response.status))
@@ -366,7 +372,7 @@ def askGeorg(connectString):
     conn = httpScheme(host=httpHost, port=httpPort)
     response = conn.request("GET", httpPath)
     if response.status == 200:
-        if BASICCHECKSTRING == response.data:
+        if BASICCHECKSTRING == response.data.strip():
             log.info(BASICCHECKSTRING)
             return True
     conn.close()
