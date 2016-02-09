@@ -349,6 +349,7 @@ class session(Thread):
             self.pSocket.close()
         except Exception, e:
             log.error(e.message)
+            self.closeRemoteSession()
             self.pSocket.close()
 
 def askGeorg(connectString):
