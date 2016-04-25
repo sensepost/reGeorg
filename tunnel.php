@@ -189,6 +189,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 				}
 			}
 			break;
+        case "DNS":
+            {
+                $rawPostData = file_get_contents("php://input");
+                $dns = gethostbyname($rawPostData);
+                echo $dns;
+            }
 	}
 }
 ?>

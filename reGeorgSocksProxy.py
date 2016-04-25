@@ -136,6 +136,8 @@ class session(Thread):
         else:
             self.httpScheme = urllib3.HTTPSConnectionPool
 
+        self.dns_cache = {}
+
     def parseSocks5(self,sock):
         log.debug("SocksVersion5 detected")
         nmethods,methods=(sock.recv(1),sock.recv(1))
@@ -172,8 +174,10 @@ class session(Thread):
         elif cmd=="\x01":#CONNECT
             serverIp = target
             try:
-                serverIp = gethostbyname(target)
+                serverIp = self.gethostbyname(target)
             except:
+                import traceback
+                print traceback.print_exc()
                 log.error("oeps")
             serverIp="".join([chr(int(i)) for i in serverIp.split(".")])
             self.cookie = self.setupRemoteSession(target,targetPort)
@@ -198,8 +202,10 @@ class session(Thread):
             target =".".join([str(ord(i)) for i in target])
             serverIp = target
             try:
-                serverIp = gethostbyname(target)
+                serverIp = self.gethostbyname(target)
             except:
+                import traceback
+                print traceback.print_exc()
                 log.error("oeps")
             serverIp="".join([chr(int(i)) for i in serverIp.split(".")])
             self.cookie = self.setupRemoteSession(target,targetPort)
@@ -219,6 +225,23 @@ class session(Thread):
             return self.parseSocks5(sock)
         elif ver == "\x04":
             return self.parseSocks4(sock)
+
+    def gethostbyname(self, host):
+        if host in self.dns_cache:
+            return self.dns_cache[host]
+
+        conn = self.httpScheme(host=self.httpHost, port=self.httpPort)
+        ipaddr = None
+        headers = {"X-CMD": "DNS"}
+        response = conn.urlopen('POST', self.connectString, headers=headers, body=host)
+        if response.status == 200:
+            log.info("DNS Query OK: [%s] <---> [%s]" % (host, response.data))
+            ipaddr = response.data
+        else:
+            log.error("DNS Query Error: [%s]" % (host, ))
+        conn.close()
+        self.dns_cache[host] = ipaddr
+        return ipaddr
 
     def setupRemoteSession(self,target,port):
         headers = {"X-CMD": "CONNECT", "X-TARGET": target, "X-PORT": port}
@@ -249,7 +272,7 @@ class session(Thread):
         conn = self.httpScheme(host=self.httpHost, port=self.httpPort)
         response = conn.request("POST", self.httpPath+"?cmd=disconnect", params, headers)
         if response.status == 200:
-            log.info("[%s:%d] Connection Terminated" % (self.target,self.port))
+            log.info("Connection Terminated")
         conn.close()
 
     def reader(self):
