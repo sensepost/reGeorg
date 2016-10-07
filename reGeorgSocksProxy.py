@@ -224,7 +224,7 @@ class session(Thread):
         cookie = None
         conn = self.httpScheme(host=self.httpHost, port=self.httpPort)
         # response = conn.request("POST", self.httpPath, params, headers)
-        response = conn.urlopen('POST', self.httpPath + "?cmd=connect&target=%s&port=%d" % (target, port), headers=headers, body="")
+        response = conn.request('POST', self.httpPath + "?cmd=connect&target=%s&port=%d" % (target, port), headers=headers, body="")
         if response.status == 200:
             status = response.getheader("x-status")
             if status == "OK":
@@ -249,14 +249,14 @@ class session(Thread):
         conn.close()
 
     def reader(self):
-        conn = urllib3.PoolManager()
+        conn = self.httpScheme(host=self.httpHost, port=self.httpPort)
         while True:
             try:
                 if not self.pSocket:
                     break
                 data = ""
                 headers = {"X-CMD": "READ", "Cookie": self.cookie, "Connection": "Keep-Alive"}
-                response = conn.urlopen('POST', self.httpPath + "?cmd=read", headers=headers, body="")
+                response = conn.request('POST', self.httpPath + "?cmd=read", headers=headers, body="")
                 data = None
                 if response.status == 200:
                     status = response.getheader("x-status")
@@ -296,7 +296,7 @@ class session(Thread):
 
     def writer(self):
         global READBUFSIZE
-        conn = urllib3.PoolManager()
+        conn = self.httpScheme(host=self.httpHost, port=self.httpPort)
         while True:
             try:
                 self.pSocket.settimeout(1)
@@ -304,7 +304,7 @@ class session(Thread):
                 if not data:
                     break
                 headers = {"X-CMD": "FORWARD", "Cookie": self.cookie, "Content-Type": "application/octet-stream", "Connection": "Keep-Alive"}
-                response = conn.urlopen('POST', self.httpPath + "?cmd=forward", headers=headers, body=data)
+                response = conn.request('POST', self.httpPath + "?cmd=forward", headers=headers, body=data)
                 if response.status == 200:
                     status = response.getheader("x-status")
                     if status == "OK":
