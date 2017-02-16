@@ -98,7 +98,7 @@ https://github.com/sensepost/reGeorg
                         while ((c = s.Receive(readBuff)) > 0)
                         {
                             byte[] newBuff = new byte[c];
-                            #Array.ConstrainedCopy(readBuff, 0, newBuff, 0, c);
+                            //Array.ConstrainedCopy(readBuff, 0, newBuff, 0, c);
                             System.Buffer.BlockCopy(readBuff, 0, newBuff, 0, c);
                             Response.BinaryWrite(newBuff);
                         }
