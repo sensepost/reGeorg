@@ -120,7 +120,7 @@ class session(Thread):
         o = urlparse(connectString)
         try:
             self.httpPort = o.port
-        except:
+        except StandardError:
             if o.scheme == "https":
                 self.httpPort = 443
             else:
@@ -171,7 +171,7 @@ class session(Thread):
             serverIp = target
             try:
                 serverIp = gethostbyname(target)
-            except:
+            except StandardError:
                 log.error("oeps")
             serverIp = "".join([chr(int(i)) for i in serverIp.split(".")])
             self.cookie = self.setupRemoteSession(target, targetPort)
@@ -196,7 +196,7 @@ class session(Thread):
             serverIp = target
             try:
                 serverIp = gethostbyname(target)
-            except:
+            except StandardError:
                 log.error("oeps")
             serverIp = "".join([chr(int(i)) for i in serverIp.split(".")])
             self.cookie = self.setupRemoteSession(target, targetPort)
@@ -268,7 +268,7 @@ class session(Thread):
                         try:
                             if response.getheader("server").find("Apache-Coyote/1.1") > 0:
                                 data = data[:len(data) - 1]
-                        except:
+                        except StandardError:
                             pass
                         if data is None:
                             data = ""
@@ -285,13 +285,13 @@ class session(Thread):
                     continue
                 transferLog.info("[%s:%d] <<<< [%d]" % (self.target, self.port, len(data)))
                 self.pSocket.send(data)
-            except Exception, ex:
+            except StandardError, ex:
                 raise ex
         self.closeRemoteSession()
         log.debug("[%s:%d] Closing localsocket" % (self.target, self.port))
         try:
             self.pSocket.close()
-        except:
+        except StandardError:
             log.debug("[%s:%d] Localsocket already closed" % (self.target, self.port))
 
     def writer(self):
@@ -319,23 +319,23 @@ class session(Thread):
                 transferLog.info("[%s:%d] >>>> [%d]" % (self.target, self.port, len(data)))
             except timeout:
                 continue
-            except Exception, ex:
+            except StandardError, ex:
                 raise ex
                 break
         self.closeRemoteSession()
         log.debug("Closing localsocket")
         try:
             self.pSocket.close()
-        except:
+        except StandardError:
             log.debug("Localsocket already closed")
 
     def run(self):
         try:
             if self.handleSocks(self.pSocket):
-                log.debug("Staring reader")
+                log.debug("Starting reader")
                 r = Thread(target=self.reader, args=())
                 r.start()
-                log.debug("Staring writer")
+                log.debug("Starting writer")
                 w = Thread(target=self.writer, args=())
                 w.start()
                 r.join()
@@ -346,7 +346,7 @@ class session(Thread):
         except SocksProtocolNotImplemented, spi:
             log.error(spi.message)
             self.pSocket.close()
-        except Exception, e:
+        except StandardError, e:
             log.error(e.message)
             self.closeRemoteSession()
             self.pSocket.close()
@@ -357,7 +357,7 @@ def askGeorg(connectString):
     o = urlparse(connectString)
     try:
         httpPort = o.port
-    except:
+    except StandardError:
         if o.scheme == "https":
             httpPort = 443
         else:
@@ -392,7 +392,7 @@ if __name__ == '__main__':
 
   willem@sensepost.com / @_w_m__
   sam@sensepost.com / @trowalts
-  etienne@sensepost.com / @kamp_staaldraad
+  etienne@sensepost.com / @_staaldraad
   \033[0m
    """
     log.setLevel(logging.DEBUG)
@@ -402,12 +402,17 @@ if __name__ == '__main__':
     parser.add_argument("-r", "--read-buff", metavar="", help="Local read buffer, max data to be sent per POST", type=int, default="1024")
     parser.add_argument("-u", "--url", metavar="", required=True, help="The url containing the tunnel script")
     parser.add_argument("-v", "--verbose", metavar="", help="Verbose output[INFO|DEBUG]", default="INFO")
+    parser.add_argument("-c", "--cert-warn-disable", help="Prevent InsecureRequestWarning messages", action='store_true', default="false")
     args = parser.parse_args()
     if (args.verbose in LEVEL):
         log.setLevel(LEVEL[args.verbose])
         log.info("Log Level set to [%s]" % args.verbose)
 
     log.info("Starting socks server [%s:%d], tunnel at [%s]" % (args.listen_on, args.listen_port, args.url))
+
+    if args.cert_warn_disable is True:
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        log.info("Certificate warnings (InsecureRequestWarning) disabled")
     log.info("Checking if Georg is ready")
     if not askGeorg(args.url):
         log.info("Georg is not ready, please check url")
@@ -421,10 +426,10 @@ if __name__ == '__main__':
         try:
             sock, addr_info = servSock.accept()
             sock.settimeout(SOCKTIMEOUT)
-            log.debug("Incomming connection")
+            log.debug("Incoming connection")
             session(sock, args.url).start()
         except KeyboardInterrupt, ex:
             break
-        except Exception, e:
+        except StandardError, e:
             log.error(e)
     servSock.close()
