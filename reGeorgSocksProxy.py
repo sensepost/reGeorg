@@ -136,7 +136,8 @@ class session(Thread):
 
     def parseSocks5(self, sock):
         log.debug("SocksVersion5 detected")
-        nmethods, methods = (sock.recv(1), sock.recv(1))
+        nmethods = sock.recv(1)
+        sock.recv(ord(nmethods))
         sock.sendall(VER + METHOD)
         ver = sock.recv(1)
         if ver == "\x02":  # this is a hack for proxychains
@@ -218,7 +219,7 @@ class session(Thread):
             return self.parseSocks4(sock)
 
     def setupRemoteSession(self, target, port):
-        headers = {"X-CMD": "CONNECT", "X-TARGET": target, "X-PORT": port}
+        headers = {"X-CMD": "CONNECT", "X-TARGET": target, "X-PORT": str(port)}
         self.target = target
         self.port = port
         cookie = None
