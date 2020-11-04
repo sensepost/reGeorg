@@ -352,7 +352,7 @@ class session(Thread):
             self.pSocket.close()
 
 
-def askGeorg(connectString):
+def askGeorg(connectString, verifySslCert=True):
     connectString = connectString
     o = urlparse(connectString)
     try:
@@ -370,7 +370,11 @@ def askGeorg(connectString):
     else:
         httpScheme = urllib3.HTTPSConnectionPool
 
-    conn = httpScheme(host=httpHost, port=httpPort)
+    if not verifySslCert: 
+        conn = httpScheme(host=httpHost, port=httpPort, assert_hostname=False)
+    else:
+        conn = httpScheme(host=httpHost, port=httpPort)
+
     response = conn.request("GET", httpPath)
     if response.status == 200:
         if BASICCHECKSTRING == response.data.strip():
@@ -401,6 +405,7 @@ if __name__ == '__main__':
     parser.add_argument("-p", "--listen-port", metavar="", help="The default listening port", type=int, default="8888")
     parser.add_argument("-r", "--read-buff", metavar="", help="Local read buffer, max data to be sent per POST", type=int, default="1024")
     parser.add_argument("-u", "--url", metavar="", required=True, help="The url containing the tunnel script")
+    parser.add_argument("-k", "--insecure", metavar="", help="Ignore SSL certificate errors when connecting to the tunnel script", dest="insecure", action="store_true", default=False)
     parser.add_argument("-v", "--verbose", metavar="", help="Verbose output[INFO|DEBUG]", default="INFO")
     args = parser.parse_args()
     if (args.verbose in LEVEL):
@@ -409,7 +414,7 @@ if __name__ == '__main__':
 
     log.info("Starting socks server [%s:%d], tunnel at [%s]" % (args.listen_on, args.listen_port, args.url))
     log.info("Checking if Georg is ready")
-    if not askGeorg(args.url):
+    if not askGeorg(args.url, args.insecure):
         log.info("Georg is not ready, please check url")
         exit()
     READBUFSIZE = args.read_buff
